@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { PSOOptimizer, generateRandomTasks, generateRandomVMs } from '../utils/psoLogic';
+import { PSOOptimizer, BasicOptimizer, generateRandomTasks, generateRandomVMs } from '../utils/psoLogic';
 import {
   Play, Pause, RotateCcw, Activity, Server, Cpu,
   Settings, Info, Zap, SkipForward, BookOpen, X
@@ -151,6 +151,7 @@ export default function PSODashboard() {
   const [maxIter, setMaxIter] = useState(200);
   const [tasks, setTasks] = useState(() => generateRandomTasks(20));
   const [vms, setVMs] = useState(() => generateRandomVMs(4));
+  const [psoEnabled, setPsoEnabled] = useState(true);
 
   const [showConfig, setShowConfig] = useState(false);
   const [showGlossary, setShowGlossary] = useState(false);
@@ -169,12 +170,13 @@ export default function PSODashboard() {
   useEffect(() => { setTasks(generateRandomTasks(numTasks)); }, [numTasks]);
   useEffect(() => { setVMs(generateRandomVMs(numVMs)); }, [numVMs]);
 
-  const initSimulation = useCallback(() => {
+  const initSimulationWithState = useCallback((isPSO) => {
     isRunningRef.current = false;
     cancelAnimationFrame(animRef.current);
     setIsRunning(false);
 
-    const pso = new PSOOptimizer({ tasks, vms, numParticles, w: paramW, c1: paramC1, c2: paramC2, maxIterations: maxIter });
+    const OptimizerClass = isPSO ? PSOOptimizer : BasicOptimizer;
+    const pso = new OptimizerClass({ tasks, vms, numParticles, w: paramW, c1: paramC1, c2: paramC2, maxIterations: maxIter });
     optimizerRef.current = pso;
 
     setSimState(buildInitialState(pso));
@@ -182,8 +184,20 @@ export default function PSODashboard() {
     setShowConfig(false);
   }, [tasks, vms, numParticles, paramW, paramC1, paramC2, maxIter]);
 
+  const initSimulation = useCallback(() => {
+    initSimulationWithState(psoEnabled);
+  }, [initSimulationWithState, psoEnabled]);
+
+  const handlePsoToggle = (e) => {
+    const enabled = e.target.checked;
+    setPsoEnabled(enabled);
+    if (!enabled && activeTab === 'pso') setActiveTab('tasks');
+    initSimulationWithState(enabled);
+  };
+
   useEffect(() => {
-    const pso = new PSOOptimizer({ tasks, vms, numParticles: 30, w: 0.9, c1: 1.5, c2: 1.5, maxIterations: 200 });
+    const OptimizerClass = psoEnabled ? PSOOptimizer : BasicOptimizer;
+    const pso = new OptimizerClass({ tasks, vms, numParticles: 30, w: 0.9, c1: 1.5, c2: 1.5, maxIterations: 200 });
     optimizerRef.current = pso;
     setSimState(buildInitialState(pso));
     setEventLog([{ iteration: 0, event: pso.lastEvent }]);
@@ -231,8 +245,8 @@ export default function PSODashboard() {
     }
   }, []);
 
-  const isDone = simState && simState.iteration >= maxIter;
-  const hasStarted = simState && simState.iteration > 0;
+  const isDone = simState && (!psoEnabled || simState.iteration >= maxIter);
+  const hasStarted = simState && (!psoEnabled || simState.iteration > 0);
 
   return (
     <div className="relative min-h-screen bg-[#030303] text-white font-sans overflow-hidden">
@@ -247,15 +261,23 @@ export default function PSODashboard() {
             </h1>
             <p className="text-gray-400 text-sm mt-1">Particle Swarm Optimization — Task Scheduling Visualizer</p>
           </div>
-          <div className="flex flex-wrap gap-3">
-            <button onClick={handleStep} disabled={isRunning || isDone || !simState}
-              className="flex items-center gap-2 px-4 py-2.5 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded-xl text-sm font-semibold transition-all disabled:opacity-40 shadow-lg">
-              <SkipForward size={15} /> Step
-            </button>
-            <button onClick={handleRunPause} disabled={isDone || !simState}
-              className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl text-sm font-bold shadow-[0_0_20px_rgba(59,130,246,0.4)] transition-all disabled:opacity-40">
-              {isRunning ? <><Pause size={15}/> Pause</> : <><Play size={15}/> Run</>}
-            </button>
+          <div className="flex flex-wrap gap-3 items-center">
+            <label className="flex items-center gap-2 cursor-pointer bg-slate-800/80 px-3 py-2 rounded-xl border border-slate-600 hover:bg-slate-700 transition">
+              <input type="checkbox" checked={psoEnabled} onChange={handlePsoToggle} className="accent-blue-500 w-4 h-4 cursor-pointer" />
+              <span className="text-sm font-semibold text-gray-200">Enable PSO</span>
+            </label>
+            {psoEnabled && (
+              <>
+                <button onClick={handleStep} disabled={isRunning || isDone || !simState}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-slate-700 hover:bg-slate-600 border border-slate-600 rounded-xl text-sm font-semibold transition-all disabled:opacity-40 shadow-lg">
+                  <SkipForward size={15} /> Step
+                </button>
+                <button onClick={handleRunPause} disabled={isDone || !simState}
+                  className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl text-sm font-bold shadow-[0_0_20px_rgba(59,130,246,0.4)] transition-all disabled:opacity-40">
+                  {isRunning ? <><Pause size={15}/> Pause</> : <><Play size={15}/> Run</>}
+                </button>
+              </>
+            )}
           </div>
         </header>
 
@@ -308,7 +330,7 @@ export default function PSODashboard() {
                 <button onClick={() => setShowConfig(false)} className="text-gray-500 hover:text-gray-300"><X size={16}/></button>
               </div>
               <div className="flex gap-2 mb-5">
-                {['tasks', 'vms', 'pso'].map(tab => (
+                {['tasks', 'vms', ...(psoEnabled ? ['pso'] : [])].map(tab => (
                   <button key={tab} onClick={() => setActiveTab(tab)}
                     className={`px-4 py-1.5 rounded-lg text-sm font-semibold capitalize transition-all ${activeTab === tab ? 'bg-blue-600 text-white' : 'bg-slate-800 text-gray-400 hover:text-white'}`}>
                     {tab === 'tasks' ? `Tasks (${numTasks})` : tab === 'vms' ? `VMs (${numVMs})` : 'PSO Params'}
@@ -342,7 +364,7 @@ export default function PSODashboard() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div>
                     <LabeledSlider label="Particle Count" hint="More particles = better search but slower." value={numParticles} min={5} max={100} onChange={setNumParticles} />
-                    <LabeledSlider label="Max Iterations" hint="How many rounds the swarm evolves." value={maxIter} min={50} max={500} onChange={setMaxIter} />
+                    <LabeledSlider label="Max Iterations" hint="How many rounds the swarm evolves. (0 = no optimization)" value={maxIter} min={0} max={500} onChange={setMaxIter} />
                   </div>
                   <div>
                     <LabeledSlider label="Inertia (w)" hint="High = explore more. Low = converge faster." value={paramW} min={0.1} max={1.5} step={0.05} onChange={setParamW} />
@@ -376,21 +398,21 @@ export default function PSODashboard() {
                 <div className="p-3 bg-purple-500/10 rounded-xl text-purple-400"><Cpu size={22}/></div>
                 <div>
                   <p className="text-gray-400 text-xs">Iteration</p>
-                  <p className="text-2xl font-bold font-mono">{simState.iteration}<span className="text-sm text-gray-400 ml-1">/ {maxIter}</span></p>
+                  <p className="text-2xl font-bold font-mono">{psoEnabled ? simState.iteration : '-'}<span className="text-sm text-gray-400 ml-1">{psoEnabled ? `/ ${maxIter}` : ''}</span></p>
                 </div>
               </div>
               <div className="glass-panel p-4 flex items-center gap-3">
                 <div className="p-3 bg-green-500/10 rounded-xl text-green-400"><Server size={22}/></div>
                 <div>
                   <p className="text-gray-400 text-xs">Inertia w</p>
-                  <p className="text-2xl font-bold font-mono">{(simState.w ?? paramW).toFixed(3)}</p>
+                  <p className="text-2xl font-bold font-mono">{psoEnabled ? (simState.w ?? paramW).toFixed(3) : '-'}</p>
                 </div>
               </div>
               <div className="glass-panel p-4 flex items-center gap-3">
                 <div className="p-3 bg-yellow-500/10 rounded-xl text-yellow-400"><Zap size={22}/></div>
                 <div>
                   <p className="text-gray-400 text-xs">Particles</p>
-                  <p className="text-2xl font-bold font-mono">{numParticles}<span className="text-sm text-gray-400 ml-1">swarm</span></p>
+                  <p className="text-2xl font-bold font-mono">{psoEnabled ? numParticles : '-'}<span className="text-sm text-gray-400 ml-1">{psoEnabled ? 'swarm' : ''}</span></p>
                 </div>
               </div>
             </div>
@@ -493,9 +515,14 @@ export default function PSODashboard() {
                     </div>
                   </div>
                 )}
-                {isDone && (
+                {isDone && psoEnabled && (
                   <div className="mt-3 p-3 bg-green-900/20 border border-green-700/40 rounded-lg text-xs text-green-400 font-semibold text-center">
                     ✅ Optimization complete — {maxIter} iterations done
+                  </div>
+                )}
+                {!psoEnabled && (
+                  <div className="mt-3 p-3 bg-slate-800/50 border border-slate-700/40 rounded-lg text-xs text-blue-400 font-semibold text-center">
+                    ℹ️ Baseline Scheduling — No iterations needed
                   </div>
                 )}
               </div>
@@ -507,8 +534,8 @@ export default function PSODashboard() {
                 <h2 className="text-lg font-bold text-gray-200">What's Happening Right Now</h2>
                 <span className="ml-auto text-xs text-gray-500">{eventLog.length} events</span>
               </div>
-              <div className="max-h-52 overflow-y-auto custom-scrollbar">
-                {!hasStarted && (
+              <div className="w-full">
+                {!hasStarted && psoEnabled && (
                   <p className="text-sm text-gray-500">Press <span className="text-blue-400 font-semibold">Run</span> or <span className="text-blue-400 font-semibold">Step</span> to begin. Each iteration will be explained here in plain English.</p>
                 )}
                 {eventLog.map((entry, i) => (

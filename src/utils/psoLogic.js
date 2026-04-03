@@ -1,3 +1,71 @@
+export class BasicOptimizer {
+  constructor(config) {
+    const { tasks, vms } = config;
+    this.tasks = tasks;
+    this.vms = vms;
+    this.numTasks = tasks.length;
+    this.numVMs = vms.length;
+
+    // Round robin assignment
+    this.gBest = new Array(this.numTasks);
+    for (let i = 0; i < this.numTasks; i++) {
+        this.gBest[i] = i % this.numVMs;
+    }
+    this.gBestFitness = this.calculateMakespan(this.gBest);
+
+    this.iteration = 0;
+    this.history = [{ iteration: 0, makespan: parseFloat(this.gBestFitness.toFixed(2)) }];
+    this.lastEvent = {
+        phase: 'Baseline',
+        icon: '📊',
+        headline: `Round Robin Baseline`,
+        detail: `Tasks assigned sequentially. No optimization. Makespan is ${this.gBestFitness.toFixed(1)} ms.`,
+    };
+    this.w = 0;
+  }
+
+  calculateMakespan(position) {
+    const vmTime = new Array(this.numVMs).fill(0);
+    for (let i = 0; i < this.numTasks; i++) {
+      const vmIdx = position[i];
+      if (vmIdx >= 0 && vmIdx < this.numVMs) {
+        vmTime[vmIdx] += this.tasks[i].length / this.vms[vmIdx].mips;
+      }
+    }
+    return Math.max(...vmTime);
+  }
+
+  step() {
+    this.iteration++;
+    this.history.push({ iteration: this.iteration, makespan: parseFloat(this.gBestFitness.toFixed(2)) });
+    this.lastEvent = {
+        phase: 'Baseline',
+        icon: '📊',
+        headline: `Round Robin Baseline`,
+        detail: `Optimization Disabled. Makespan remains ${this.gBestFitness.toFixed(1)} ms.`,
+    };
+    return {
+      iteration: this.iteration,
+      gBest: this.gBest,
+      gBestFitness: this.gBestFitness,
+      history: [...this.history],
+      vms: this.vms,
+      tasks: this.tasks,
+      event: this.lastEvent,
+      w: this.w,
+    };
+  }
+
+  getVMWorkload() {
+    return this.vms.map(vm => {
+      const assigned = this.tasks.filter((_, i) => this.gBest[i] === vm.id);
+      const totalLength = assigned.reduce((s, t) => s + t.length, 0);
+      const execTime = assigned.reduce((s, t) => s + t.length / vm.mips, 0);
+      return { ...vm, assigned, totalLength, execTime };
+    });
+  }
+}
+
 export class PSOOptimizer {
   constructor(config) {
     const {
