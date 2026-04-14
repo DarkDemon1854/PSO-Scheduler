@@ -159,6 +159,10 @@ export default function PSODashboard() {
   const [isRunning, setIsRunning] = useState(false);
   const [simState, setSimState] = useState(null);
   const [eventLog, setEventLog] = useState([]);
+  const [replayData, setReplayData] = useState(null);
+  const [isReplaying, setIsReplaying] = useState(false);
+  const replayTimerRef = useRef(null);
+  const prevIsDoneRef = useRef(false);
 
   const optimizerRef = useRef(null);
   const isRunningRef = useRef(false);
@@ -188,8 +192,7 @@ export default function PSODashboard() {
     initSimulationWithState(psoEnabled);
   }, [initSimulationWithState, psoEnabled]);
 
-  const handlePsoToggle = (e) => {
-    const enabled = e.target.checked;
+  const handlePsoToggle = (enabled) => {
     setPsoEnabled(enabled);
     if (!enabled && activeTab === 'pso') setActiveTab('tasks');
     initSimulationWithState(enabled);
@@ -215,7 +218,7 @@ export default function PSODashboard() {
       const s = pso.step();
       setSimState({ ...s, workload: pso.getVMWorkload() });
       if (s.event) {
-        setEventLog(prev => [{ iteration: s.iteration, event: s.event }, ...prev].slice(0, 80));
+        setEventLog(prev => [{ iteration: s.iteration, event: s.event }, ...prev]);
       }
       animRef.current = requestAnimationFrame(tick);
     };
@@ -241,12 +244,49 @@ export default function PSODashboard() {
     const s = pso.step();
     setSimState({ ...s, workload: pso.getVMWorkload() });
     if (s.event) {
-      setEventLog(prev => [{ iteration: s.iteration, event: s.event }, ...prev].slice(0, 80));
+      setEventLog(prev => [{ iteration: s.iteration, event: s.event }, ...prev]);
     }
   }, []);
 
   const isDone = simState && (!psoEnabled || simState.iteration >= maxIter);
   const hasStarted = simState && (!psoEnabled || simState.iteration > 0);
+
+
+  useEffect(() => {
+    if (isDone && psoEnabled && !prevIsDoneRef.current && simState && simState.history.length > 1) {
+
+      clearInterval(replayTimerRef.current);
+      setIsReplaying(true);
+      const fullHistory = simState.history;
+      let idx = 0;
+      const step = Math.max(1, Math.floor(fullHistory.length / 30));
+      const interval = 5;
+      setReplayData([]);
+
+      replayTimerRef.current = setInterval(() => {
+        idx += step;
+        if (idx >= fullHistory.length) {
+          setReplayData(fullHistory);
+          setIsReplaying(false);
+          clearInterval(replayTimerRef.current);
+        } else {
+          setReplayData(fullHistory.slice(0, idx + 1));
+        }
+      }, interval);
+    }
+    prevIsDoneRef.current = isDone;
+    return () => clearInterval(replayTimerRef.current);
+  }, [isDone, psoEnabled, simState]);
+
+
+  useEffect(() => {
+    if (simState && simState.iteration === 0) {
+      clearInterval(replayTimerRef.current);
+      setReplayData(null);
+      setIsReplaying(false);
+      prevIsDoneRef.current = false;
+    }
+  }, [simState?.iteration]);
 
   return (
     <div className="relative min-h-screen bg-[#030303] text-white font-sans overflow-hidden">
@@ -262,10 +302,42 @@ export default function PSODashboard() {
             <p className="text-gray-400 text-sm mt-1">Particle Swarm Optimization — Task Scheduling Visualizer</p>
           </div>
           <div className="flex flex-wrap gap-3 items-center">
-            <label className="flex items-center gap-2 cursor-pointer bg-slate-800/80 px-3 py-2 rounded-xl border border-slate-600 hover:bg-slate-700 transition">
-              <input type="checkbox" checked={psoEnabled} onChange={handlePsoToggle} className="accent-blue-500 w-4 h-4 cursor-pointer" />
-              <span className="text-sm font-semibold text-gray-200">Enable PSO</span>
-            </label>
+            <motion.button
+              onClick={() => handlePsoToggle(!psoEnabled)}
+              className={`flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all duration-300 shadow-lg border ${
+                psoEnabled 
+                  ? 'bg-slate-700 hover:bg-slate-600 border-slate-500 text-gray-200 shadow-[0_0_15px_rgba(0,0,0,0.4)]'
+                  : 'bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 border-blue-400/50 text-white shadow-[0_0_20px_rgba(99,102,241,0.4)]'
+              }`}
+              whileTap={{ scale: 0.95 }}
+              layout
+            >
+              <AnimatePresence mode="wait" initial={false}>
+                {psoEnabled ? (
+                  <motion.div
+                    key="disable"
+                    initial={{ opacity: 0, y: -15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 15 }}
+                    transition={{ duration: 0.2 }}
+                    className="flex items-center gap-1.5"
+                  >
+                    <Pause size={15} /> Disable PSO
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="enable"
+                    initial={{ opacity: 0, y: -15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 15 }}
+                    transition={{ duration: 0.2 }}
+                    className="flex items-center gap-1.5"
+                  >
+                    <Zap size={15} /> Enable PSO
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </motion.button>
             {psoEnabled && (
               <>
                 <button onClick={handleStep} disabled={isRunning || isDone || !simState}
@@ -484,24 +556,56 @@ export default function PSODashboard() {
               </div>
 
               <div className="glass-panel p-5">
-                <h2 className="text-lg font-bold text-gray-200 mb-1">Convergence Curve</h2>
+                <div className="flex items-center justify-between mb-1">
+                  <h2 className="text-lg font-bold text-gray-200">Convergence Curve</h2>
+                  {isReplaying && (
+                    <motion.span
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="text-xs text-blue-400 bg-blue-500/10 px-2.5 py-1 rounded-full font-semibold flex items-center gap-1.5"
+                    >
+                      <motion.span
+                        animate={{ opacity: [1, 0.3, 1] }}
+                        transition={{ repeat: Infinity, duration: 1 }}
+                        className="w-1.5 h-1.5 rounded-full bg-blue-400 inline-block"
+                      />
+                      Replaying
+                    </motion.span>
+                  )}
+                </div>
                 <p className="text-xs text-gray-500 mb-4">Makespan drops as the swarm finds better schedules. Flattening = converged.</p>
                 <div className="h-[200px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={simState.history}>
+                    <LineChart data={isReplaying && replayData ? replayData : simState.history}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                      <XAxis dataKey="iteration" stroke="#475569" tick={{ fill: '#475569', fontSize: 10 }} />
-                      <YAxis dataKey="makespan" stroke="#475569" tick={{ fill: '#475569', fontSize: 10 }} domain={['auto', 'auto']} />
+                      <XAxis
+                        dataKey="iteration" stroke="#475569" tick={{ fill: '#475569', fontSize: 10 }}
+                        domain={isDone && psoEnabled ? [0, maxIter] : undefined}
+                        type="number"
+                      />
+                      <YAxis
+                        dataKey="makespan" stroke="#475569" tick={{ fill: '#475569', fontSize: 10 }}
+                        domain={isDone && simState.history.length > 1
+                          ? [Math.floor(simState.history[simState.history.length - 1].makespan * 0.95), Math.ceil(simState.history[0].makespan * 1.05)]
+                          : ['auto', 'auto']}
+                      />
                       <Tooltip
                         contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '8px', fontSize: '11px' }}
                         itemStyle={{ color: '#60a5fa' }}
                         formatter={v => [`${v.toFixed(2)} ms`, 'Makespan']}
                       />
-                      <Line type="monotone" dataKey="makespan" stroke="#3b82f6" strokeWidth={2.5} dot={false} activeDot={{ r: 5, strokeWidth: 0, fill: '#60a5fa' }} />
+                      <Line
+                        type="monotone" dataKey="makespan"
+                        stroke={isReplaying ? '#818cf8' : '#3b82f6'}
+                        strokeWidth={isReplaying ? 3 : 2.5}
+                        dot={false}
+                        activeDot={{ r: 5, strokeWidth: 0, fill: '#60a5fa' }}
+                        isAnimationActive={false}
+                      />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
-                {simState.iteration > 1 && (
+                {simState.iteration > 1 && !isReplaying && (
                   <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
                     <div className="bg-slate-800/50 rounded-lg p-2">
                       <p className="text-gray-400">Initial</p>
@@ -515,11 +619,18 @@ export default function PSODashboard() {
                     </div>
                   </div>
                 )}
-                {isDone && psoEnabled && (
-                  <div className="mt-3 p-3 bg-green-900/20 border border-green-700/40 rounded-lg text-xs text-green-400 font-semibold text-center">
-                    ✅ Optimization complete — {maxIter} iterations done
-                  </div>
-                )}
+                <AnimatePresence>
+                  {isDone && psoEnabled && !isReplaying && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.3 }}
+                      className="mt-3 p-3 bg-green-900/20 border border-green-700/40 rounded-lg text-xs text-green-400 font-semibold text-center"
+                    >
+                      ✅ Optimization complete — {maxIter} iterations done
+                    </motion.div>
+                  )}
+                </AnimatePresence>
                 {!psoEnabled && (
                   <div className="mt-3 p-3 bg-slate-800/50 border border-slate-700/40 rounded-lg text-xs text-blue-400 font-semibold text-center">
                     ℹ️ Baseline Scheduling — No iterations needed
@@ -528,21 +639,28 @@ export default function PSODashboard() {
               </div>
             </div>
 
-            <div className="glass-panel p-5">
-              <div className="flex items-center gap-2 mb-4">
-                <Info size={15} className="text-blue-400" />
-                <h2 className="text-lg font-bold text-gray-200">What's Happening Right Now</h2>
-                <span className="ml-auto text-xs text-gray-500">{eventLog.length} events</span>
-              </div>
-              <div className="w-full">
-                {!hasStarted && psoEnabled && (
-                  <p className="text-sm text-gray-500">Press <span className="text-blue-400 font-semibold">Run</span> or <span className="text-blue-400 font-semibold">Step</span> to begin. Each iteration will be explained here in plain English.</p>
-                )}
-                {eventLog.map((entry, i) => (
-                  <EventEntry key={i} event={entry.event} iteration={entry.iteration} isLatest={i === 0} />
-                ))}
-              </div>
-            </div>
+            <AnimatePresence>
+              {hasStarted && (
+                <motion.div
+                  initial={{ opacity: 0, y: 30, scale: 0.97 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 20, scale: 0.97 }}
+                  transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+                  className="glass-panel p-5"
+                >
+                  <div className="flex items-center gap-2 mb-4">
+                    <Info size={15} className="text-blue-400" />
+                    <h2 className="text-lg font-bold text-gray-200">What's Happening Right Now</h2>
+                    <span className="ml-auto text-xs text-gray-500">{eventLog.length} events</span>
+                  </div>
+                  <div className="w-full max-h-[60vh] overflow-y-auto custom-scrollbar">
+                    {eventLog.map((entry, i) => (
+                      <EventEntry key={i} event={entry.event} iteration={entry.iteration} isLatest={i === 0} />
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </>
         )}
       </div>
